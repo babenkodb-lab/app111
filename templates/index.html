@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Космический питомец 🐶</title>
+    <style>
+        /* Общие стили: делаем фон и текст адаптивными под тему Telegram */
+        body {
+            /* Используем переменные CSS, которые мы потом заполним из Telegram */
+            background-color: var(--tg-bg-color, #fff);
+            color: var(--tg-text-color, #000);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 16px;
+            box-sizing: border-box;
+            /* Плавные переходы при смене темы */
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        /* Карточка питомца — как космический модуль */
+        .pet-container {
+            background-color: var(--tg-secondary-bg-color, #f0f0f0);
+            border-radius: 24px;
+            padding: 24px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+            text-align: center;
+            width: 100%;
+            max-width: 320px;
+            transition: background-color 0.3s;
+        }
+
+        /* Смайлик питомца */
+        .pet-emoji {
+            font-size: 80px;
+            display: block;
+            transition: transform 0.2s ease-in-out;
+        }
+
+        /* Анимация увеличения, когда питомец радуется корму */
+        .pet-emoji.bounce {
+            transform: scale(1.3);
+        }
+
+        /* Блок со шкалами */
+        .stats {
+            margin-top: 20px;
+            text-align: left;
+        }
+
+        /* Подпись к шкале */
+        .stat-label {
+            font-weight: bold;
+            margin: 12px 0 4px;
+        }
+
+        /* Контейнер прогресс-бара */
+        .progress-bar {
+            background-color: var(--tg-hint-color, #ddd);
+            border-radius: 12px;
+            height: 20px;
+            width: 100%;
+            overflow: hidden;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        /* Заполненная часть прогресс-бара */
+        .progress-fill {
+            height: 100%;
+            width: 100%; /* будет меняться через JS */
+            border-radius: 12px;
+            transition: width 0.3s ease, background-color 0.3s;
+        }
+
+        /* Цвета для шкалы сытости (оранжевый) */
+        .hunger-fill {
+            background-color: #FF9F1C;
+        }
+
+        /* Цвета для шкалы настроения (голубой) */
+        .mood-fill {
+            background-color: #2EC4B6;
+        }
+
+        /* Всплывающее сообщение (тост) */
+        .toast {
+            position: fixed;
+            bottom: 100px; /* над MainButton Telegram */
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: var(--tg-button-color, #2481cc);
+            color: var(--tg-button-text-color, #fff);
+            padding: 12px 24px;
+            border-radius: 30px;
+            font-size: 16px;
+            font-weight: bold;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+            z-index: 999;
+            white-space: nowrap;
+        }
+
+        .toast.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        /* Предупреждение (когда голоден) — отдельный стиль, красноватый */
+        .toast.warning {
+            background-color: #E63946;
+        }
+    </style>
+</head>
+<body>
+    <!-- Карточка с питомцем и шкалами -->
+    <div class="pet-container">
+        <!-- Смайлик питомца, по умолчанию 🐶 -->
+        <span id="petEmoji" class="pet-emoji">🐶</span>
+
+        <!-- Статистика: сытость -->
+        <div class="stats">
+            <div class="stat-label">🍖 Сытость</div>
+            <div class="progress-bar">
+                <div id="hungerFill" class="progress-fill hunger-fill" style="width: 100%;"></div>
+            </div>
+            <div class="stat-label">😊 Настроение</div>
+            <div class="progress-bar">
+                <div id="moodFill" class="progress-fill mood-fill" style="width: 100%;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Всплывающее сообщение (будем показывать его с помощью JS) -->
+    <div id="toast" class="toast"></div>
+
+    <!-- Подключаем Telegram Web App SDK. Этот скрипт всегда доступен в Mini App -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+    <script>
+        // ============================================
+        // 1. Инициализация Telegram Mini App
+        // ============================================
+        // window.Telegram.WebApp — объект, который даёт Telegram.
+        // С его помощью мы взаимодействуем с интерфейсом мессенджера.
+        const tg = window.Telegram.WebApp;
+
+        // Сообщаем Telegram, что наше приложение загрузилось и готово к показу.
+        tg.ready();
+
+        // Запрещаем вертикальные свайпы (перетаскивание вниз), чтобы не мешали игре.
+        tg.disableVerticalSwipes();
+
+        // ============================================
+        // 2. Адаптация под тему Telegram
+        // ============================================
+        // Достаём цвета из параметров темы Telegram.
+        const themeParams = tg.themeParams;
+
+        // Устанавливаем CSS-переменные, которые используются в стилях.
+        // Они будут меняться при переключении между светлой и тёмной темой.
+        document.documentElement.style.setProperty('--tg-bg-color', themeParams.bg_color || '#ffffff');
+        document.documentElement.style.setProperty('--tg-text-color', themeParams.text_color || '#000000');
+        document.documentElement.style.setProperty('--tg-secondary-bg-color', themeParams.secondary_bg_color || '#f0f0f0');
+        document.documentElement.style.setProperty('--tg-button-color', themeParams.button_color || '#2481cc');
+        document.documentElement.style.setProperty('--tg-button-text-color', themeParams.button_text_color || '#ffffff');
+        document.documentElement.style.setProperty('--tg-hint-color', themeParams.hint_color || '#999999');
+
+        // ============================================
+        // 3. Переменные состояния питомца
+        // ============================================
+        // hunger — уровень сытости (0–100), mood — настроение (0–100).
+        // Начинаем с полностью счастливого и сытого питомца.
+        let hunger = 100;
+        let mood = 100;
+
+        // Флаг, чтобы не показывать предупреждение о голоде повторно, пока не покормят.
+        let warningShown = false;
+
+        // Получаем ссылки на элементы DOM один раз, чтобы не искать их постоянно.
+        const petEmojiElement = document.getElementById('petEmoji');
+        const hungerFillElement = document.getElementById('hungerFill');
+        const moodFillElement = document.getElementById('moodFill');
+        const toastElement = document.getElementById('toast');
+
+        // ============================================
+        // 4. Функция обновления внешнего вида питомца
+        // ============================================
+        function updatePetAppearance() {
+            // Меняем смайлик по условиям:
+            // 😄 — если оба показателя > 70
+            // 😢 — если хотя бы один < 30
+            // 😐 — в остальных случаях
+            if (hunger > 70 && mood > 70) {
+                petEmojiElement.textContent = '😄'; // Весёлый космонавт
+            } else if (hunger < 30 || mood < 30) {
+                petEmojiElement.textContent = '😢'; // Грустный, пора кормить!
+            } else {
+                petEmojiElement.textContent = '😐'; // Так себе, нормально
+            }
+
+            // Обновляем ширину прогресс-баров (проценты от 100)
+            hungerFillElement.style.width = hunger + '%';
+            moodFillElement.style.width = mood + '%';
+
+            // Проверка на критический голод (0 сытости)
+            if (hunger === 0 && !warningShown) {
+                // Показываем предупреждение красноватым тостом
+                showToast('О нет! 😢 Питомец совсем голоден! Покорми его скорее!', 'warning');
+                warningShown = true; // чтобы не спамить сообщениями
+            } else if (hunger > 0 && warningShown) {
+                // Если покормили и предупреждение уже показано — сбрасываем флаг
+                warningShown = false;
+            }
+        }
+
+        // ============================================
+        // 5. Функция показа всплывающего сообщения (тост)
+        // ============================================
+        function showToast(message, type = '') {
+            // Устанавливаем текст сообщения
+            toastElement.textContent = message;
+            // Если передан тип (например, 'warning'), добавляем класс для красного фона
+            toastElement.className = 'toast ' + (type ? type : '');
+            // Делаем тост видимым
+            toastElement.classList.add('show');
+
+            // Через 2 секунды автоматически скрываем
+            setTimeout(() => {
+                toastElement.classList.remove('show');
+            }, 2000);
+        }
+
+        // ============================================
+        // 6. Главная функция кормления
+        // ============================================
+        function feedPet() {
+            // Увеличиваем сытость на 25, но не больше 100
+            hunger = Math.min(hunger + 25, 100);
+            // Увеличиваем настроение на 10, но не больше 100
+            mood = Math.min(mood + 10, 100);
+
+            // Обновляем шкалы и смайлик
+            updatePetAppearance();
+
+            // Запускаем анимацию увеличения смайлика
+            petEmojiElement.classList.add('bounce');
+            // Через 300 миллисекунд убираем класс, анимация вернёт размер обратно (transition 0.2s)
+            setTimeout(() => {
+                petEmojiElement.classList.remove('bounce');
+            }, 300);
+
+            // Показываем весёлое сообщение
+            showToast('Ням-ням! 🍖 Питомец покормлен и радуется!');
+        }
+
+        // ============================================
+        // 7. Главная кнопка Telegram MainButton
+        // ============================================
+        // Создаём объект главной кнопки и настраиваем её.
+        const mainButton = tg.MainButton;
+        mainButton.setText('Покормить 🥩'); // Текст на кнопке
+        mainButton.show(); // Показываем кнопку сразу
+
+        // Когда пользователь нажимает кнопку, вызываем feedPet
+        mainButton.onClick(() => {
+            feedPet();
+        });
+
+        // ============================================
+        // 8. Таймер уменьшения показателей (каждые 3 секунды)
+        // ============================================
+        setInterval(() => {
+            // Уменьшаем сытость на 3, но не ниже 0
+            hunger = Math.max(hunger - 3, 0);
+            // Уменьшаем настроение на 2, но не ниже 0
+            mood = Math.max(mood - 2, 0);
+
+            // Обновляем отображение
+            updatePetAppearance();
+        }, 3000); // 3000 миллисекунд = 3 секунды
+
+        // ============================================
+        // 9. Начальное обновление интерфейса
+        // ============================================
+        // Вызываем один раз, чтобы всё установилось.
+        updatePetAppearance();
+
+        // ============================================
+        // Дополнительно: слушаем событие изменения темы Telegram,
+        // чтобы мгновенно подхватывать изменения (например, пользователь переключил тему).
+        tg.onEvent('themeChanged', () => {
+            const newTheme = tg.themeParams;
+            document.documentElement.style.setProperty('--tg-bg-color', newTheme.bg_color);
+            document.documentElement.style.setProperty('--tg-text-color', newTheme.text_color);
+            document.documentElement.style.setProperty('--tg-secondary-bg-color', newTheme.secondary_bg_color);
+            document.documentElement.style.setProperty('--tg-button-color', newTheme.button_color);
+            document.documentElement.style.setProperty('--tg-button-text-color', newTheme.button_text_color);
+            document.documentElement.style.setProperty('--tg-hint-color', newTheme.hint_color);
+        });
+    </script>
+</body>
+</html>
